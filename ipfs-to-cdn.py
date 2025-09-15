@@ -3,7 +3,7 @@
 Single-pass IPFS -> Bunny pipeline for files named N.png (no padding).
 For each n in [start, end]:
   - GET n.png from the gateway
-  - If 200, save to temp, immediately PUT to Bunny, then delete local (optional)
+  - If 200, save to temp, immediately PUT to Bunny, then delete local
   - If 404/timeout, count as "missing"
 Stop after --max-missing consecutive misses.
 """
@@ -23,16 +23,18 @@ from requests.adapters import HTTPAdapter, Retry
 DEFAULT_CID = "QmdYwvVtjNFKRqHEWPChdkfM24Z1i34FmmC4uAjDdnJ7NF"
 DEFAULT_GATEWAY = "https://ipfs.io"
 DEFAULT_START_NUMBER = 1
-DEFAULT_END_NUMBER   = 10000
-DEFAULT_MAX_MISSING  = 75
+DEFAULT_END_NUMBER = 10000
+DEFAULT_MAX_MISSING = 75
 DEFAULT_DOWNLOAD_TIMEOUT = 180
-DEFAULT_DEST_PATH    = "ape_images/"
+DEFAULT_DEST_PATH = "ape_images/"
 DEFAULT_DELETE_LOCAL = True
 
 # Bunny via env by default
 DEFAULT_STORAGE_ZONE = os.getenv("BUNNY_STORAGE_ZONE", "")
-DEFAULT_ACCESS_KEY   = os.getenv("BUNNY_ACCESS_KEY", "")
-DEFAULT_REGION_HOST  = os.getenv("BUNNY_REGION_HOST", None)  # e.g. "la.storage.bunnycdn.com"
+DEFAULT_ACCESS_KEY = os.getenv("BUNNY_ACCESS_KEY", "")
+# e.g. "la.storage.bunnycdn.com"
+DEFAULT_REGION_HOST = os.getenv("BUNNY_REGION_HOST", None)
+
 
 def make_session():
     s = requests.Session()
@@ -42,12 +44,18 @@ def make_session():
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET", "PUT"]
     )
-    adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+    adapter = HTTPAdapter(
+        max_retries=retries, pool_connections=20, pool_maxsize=20
+    )
     s.mount("http://", adapter)
     s.mount("https://", adapter)
     return s
 
-def download_png(session: requests.Session, gateway: str, cid: str, n: int, out_file: Path, timeout: int):
+
+def download_png(
+    session: requests.Session, gateway: str, cid: str, n: int,
+    out_file: Path, timeout: int
+):
     url = f"{gateway.rstrip('/')}/ipfs/{cid}/{n}.png"
     with session.get(url, stream=True, timeout=timeout) as r:
         if r.status_code != 200:
@@ -59,7 +67,15 @@ def download_png(session: requests.Session, gateway: str, cid: str, n: int, out_
                     f.write(chunk)
     return True, 200
 
-def bunny_put(session, storage_zone, access_key, region_host, dest_key, file_path: Path):
+
+def bunny_put(
+    session,
+    storage_zone,
+    access_key,
+    region_host,
+    dest_key,
+    file_path: Path
+):
     base = region_host.strip() if region_host else "storage.bunnycdn.com"
     url = f"https://{base}/{quote(storage_zone.strip())}/{dest_key}"
     headers = {
@@ -70,16 +86,23 @@ def bunny_put(session, storage_zone, access_key, region_host, dest_key, file_pat
         resp = session.put(url, headers=headers, data=f, timeout=180)
     return resp.status_code in (200, 201), resp.status_code, resp.text[:200]
 
+
 def main():
-    ap = argparse.ArgumentParser(description="Single-pass IPFS (N.png) -> Bunny uploader.")
+    ap = argparse.ArgumentParser(
+        description="Single-pass IPFS (N.png) -> Bunny uploader."
+    )
     ap.add_argument("--cid", default=DEFAULT_CID)
     ap.add_argument("--gateway", default=DEFAULT_GATEWAY)
     ap.add_argument("--start-number", type=int, default=DEFAULT_START_NUMBER)
     ap.add_argument("--end-number", type=int, default=DEFAULT_END_NUMBER)
     ap.add_argument("--max-missing", type=int, default=DEFAULT_MAX_MISSING)
-    ap.add_argument("--download-timeout", type=int, default=DEFAULT_DOWNLOAD_TIMEOUT)
+    ap.add_argument(
+        "--download-timeout", type=int, default=DEFAULT_DOWNLOAD_TIMEOUT
+    )
     ap.add_argument("--dest-path", default=DEFAULT_DEST_PATH)
-    ap.add_argument("--delete-local", action="store_true", default=DEFAULT_DELETE_LOCAL)
+    ap.add_argument(
+        "--delete-local", action="store_true", default=DEFAULT_DELETE_LOCAL
+    )
     # Bunny
     ap.add_argument("--storage-zone", default=DEFAULT_STORAGE_ZONE)
     ap.add_argument("--access-key", default=DEFAULT_ACCESS_KEY)
@@ -88,7 +111,11 @@ def main():
     args = ap.parse_args()
 
     if not args.storage_zone or not args.access_key:
-        print("ERROR: Bunny credentials missing. Set --storage-zone/--access-key or env vars BUNNY_STORAGE_ZONE/BUNNY_ACCESS_KEY.", file=sys.stderr)
+        print(
+            "ERROR: Bunny credentials missing. Set --storage-zone/--access-key"
+            " or env vars BUNNY_STORAGE_ZONE/BUNNY_ACCESS_KEY.",
+            file=sys.stderr
+        )
         sys.exit(1)
 
     dest_prefix = args.dest_path.strip()
@@ -100,7 +127,10 @@ def main():
     tempdir_path = Path(tempdir)
 
     total = args.end_number - args.start_number + 1
-    print(f"Single-pass: scanning & uploading {total} candidates: {args.gateway}/ipfs/{args.cid}/N.png")
+    print(
+        f"Single-pass: scanning & uploading {total} candidates: "
+        f"{args.gateway}/ipfs/{args.cid}/N.png"
+    )
     print(f"Stopping after {args.max_missing} consecutive misses.")
 
     consecutive_missing = 0
@@ -113,13 +143,22 @@ def main():
             filename = f"{n}.png"
             local_path = tempdir_path / filename
 
-            ok, code = download_png(session, args.gateway, args.cid, n, local_path, args.download_timeout)
+            ok, code = download_png(
+                session, args.gateway, args.cid, n, local_path,
+                args.download_timeout
+            )
             if not ok:
                 consecutive_missing += 1
                 if n % 25 == 0:
-                    print(f"[{n}] missing (HTTP {code}); miss streak={consecutive_missing}")
+                    print(
+                        f"[{n}] missing (HTTP {code}); "
+                        f"miss streak={consecutive_missing}"
+                    )
                 if consecutive_missing >= args.max_missing:
-                    print(f"Stopping at n={n}: reached {consecutive_missing} consecutive misses.")
+                    print(
+                        f"Stopping at n={n}: reached {consecutive_missing} "
+                        f"consecutive misses."
+                    )
                     break
                 continue
 
@@ -127,7 +166,10 @@ def main():
             consecutive_missing = 0
             found_count += 1
             dest_key = f"{dest_prefix}{filename}"
-            up_ok, up_code, up_text = bunny_put(session, args.storage_zone, args.access_key, args.region_host, dest_key, local_path)
+            up_ok, up_code, up_text = bunny_put(
+                session, args.storage_zone, args.access_key, args.region_host,
+                dest_key, local_path
+            )
             if up_ok:
                 uploaded_count += 1
                 print(f"[{n}] uploaded -> {dest_key}")
@@ -138,10 +180,16 @@ def main():
                         pass
             else:
                 errors_upload += 1
-                print(f"[{n}] upload FAILED (HTTP {up_code}): {up_text}", file=sys.stderr)
+                print(
+                    f"[{n}] upload FAILED (HTTP {up_code}): {up_text}",
+                    file=sys.stderr
+                )
                 # keep local copy for inspection
 
-        print(f"Done. Found: {found_count}, Uploaded: {uploaded_count}, Upload errors: {errors_upload}")
+        print(
+            f"Done. Found: {found_count}, Uploaded: {uploaded_count}, "
+            f"Upload errors: {errors_upload}"
+        )
         if errors_upload == 0 and args.delete_local:
             shutil.rmtree(tempdir, ignore_errors=True)
             print("Local temp files deleted.")
@@ -150,6 +198,7 @@ def main():
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
         print(f"Local files kept at: {tempdir}")
+
 
 if __name__ == "__main__":
     main()
